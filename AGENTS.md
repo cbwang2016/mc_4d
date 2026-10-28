@@ -1,0 +1,1 @@
+Never commit as an agent. Only humans can commit.

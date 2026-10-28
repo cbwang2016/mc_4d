@@ -1,0 +1,15 @@
+[package]
+name = "mc4d-render"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+mc4d-core.workspace = true
+glam.workspace = true
+bytemuck.workspace = true
+wgpu.workspace = true
+log.workspace = true
+
+[dev-dependencies]
+naga = { version = "30", features = ["wgsl-in"] }
