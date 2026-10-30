@@ -1,0 +1,1 @@
+Chinese item/block names matched from the user-installed official Minecraft language resources where names agree, with classic Beta terminology translated explicitly. Minecraft language data retains its original Mojang/Microsoft rights; it is not relicensed as project source code.

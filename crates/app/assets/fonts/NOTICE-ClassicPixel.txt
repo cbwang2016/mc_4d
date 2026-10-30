@@ -1,0 +1,1 @@
+ASCII vector contours converted from the original Minecraft Beta 1.5 font/default.png pixel grid. Source artwork retains its Mojang/Microsoft rights; this font is not relicensed under the project code license. Generated family name: MC4D Classic Pixel. Non-ASCII characters use the separately licensed bundled Noto/DejaVu fonts.

@@ -1,0 +1,26 @@
+Minecraft Beta 1.5 reference textures
+
+These PNG files are unchanged images extracted from the official Minecraft
+Beta 1.5 client JAR supplied by Mojang. Minecraft and these original textures
+are the property of Mojang/Microsoft. They are NOT covered by this project's
+MIT OR Apache-2.0 software license. No ownership of these images is claimed.
+
+Source client SHA-1: f5ce1699cd728213c21054fa2f1490d162b002b4
+Source URL: https://launcher.mojang.com/v1/objects/f5ce1699cd728213c21054fa2f1490d162b002b4/client.jar
+Version metadata: https://launchermeta.mojang.com/v1/packages/3fa704bd73444368f04351d6d4add8a3eead9b4e/b1.5.json
+
+The renderer uses the original pixels with nearest-neighbor sampling. World grass
+and oak leaves use the original grasscolor.png/foliagecolor.png lookup tables,
+with climate sampled from the 4D world's temperature and moisture fields.
+Spruce and birch retain the original fixed species colors; Fast graphics uses
+the original opaque leaf tiles. Tints and lighting follow the original encoded
+RGB multiplication before converting to the renderer's linear output.
+Water, lava, and fire animations use the original Beta texture-effect equations.
+The 4D adaptation changes projection and climate coordinates, not source PNGs.
+
+The first-person arm uses the original mob/char.png skin. Held blocks use
+qa/cn inventory dispatch, bounds, and face tiles rather than world-context
+biome textures; sprites retain the original 1/16-block extrusion and pose.
+models.json and held-blocks.json record the verified client model/held-block
+observations; scripts/reference contains the reflection extractors and the
+corresponding scripts/generate_* tools reproduce the Rust/WGSL tables.

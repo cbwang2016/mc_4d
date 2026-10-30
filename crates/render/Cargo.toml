@@ -5,11 +5,15 @@ version.workspace = true
 license.workspace = true
 
 [dependencies]
+rustc-hash = "2.1"
+miniz_oxide = "0.8"
 mc4d-core.workspace = true
 glam.workspace = true
 bytemuck.workspace = true
 wgpu.workspace = true
 log.workspace = true
+png = "0.18"
 
 [dev-dependencies]
 naga = { version = "30", features = ["wgsl-in"] }
+pollster.workspace = true

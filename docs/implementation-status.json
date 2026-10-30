@@ -1,0 +1,219 @@
+{
+  "source_request": "/home/user/.codex/attachments/7c281c55-e91a-4b4e-b3ee-9464bec75143/pasted-text-1.txt",
+  "constraints": [
+    "Never commit as an agent",
+    "All writes inside repository",
+    "Intro video defaults to 1920x1080",
+    "Inspect Beta1.5 JAR and assets first",
+    "F3 overlay enabled by default",
+    "Default main plus auxiliary view; grids optional and excluded from video",
+    "Start tutorial with visual supercube concepts, faces and cubic boundary cells",
+    "Original Minecraft texture style with minimal changes",
+    "Diversified terrain and biomes",
+    "Nether explicitly excluded by user",
+    "Large architectural refactors explicitly authorized to match Beta1.5",
+    "Continue autonomously; do not ask user questions for8hours from2026-10-30 01:21:19SGT"
+  ],
+  "reference": {
+    "version": "b1.5",
+    "jar_sha1": "f5ce1699cd728213c21054fa2f1490d162b002b4",
+    "bundled_classes": 711,
+    "bundled_nonclass_files": 83,
+    "external_legacy_assets_verified": 749,
+    "note": "Legacy index is a superset containing later assets. Reference files live in ignored target/reference/beta-1.5; they are not game assets."
+  },
+  "requirements": [
+    {
+      "id": 1,
+      "requirement": "Minimum 30 FPS on this computer in every scene (revised from 50 by user)",
+      "status": "in_progress",
+      "remaining": [
+        "Full gameplay frame-time instrumentation including movement, streaming, edits, fluid simulation, autosave, menus and all view counts",
+        "Hardware performance verification after final features",
+        "Optimize worst frames; static averages do not prove requirement"
+      ]
+    },
+    {
+      "id": 2,
+      "requirement": "Almost all Minecraft Beta1.5 features plus creative inventory and main screen",
+      "status": "in_progress",
+      "feature_groups": [
+        "Title/world management/settings",
+        "Inventory, crafting, tools and equipment",
+        "Chests, furnaces, dispensers",
+        "Flowing water/lava and buckets",
+        "Survival health, damage, food, death/respawn",
+        "Passive/hostile mobs, drops, combat and taming",
+        "Terrain/biomes/caves/ores, plants, farming, trees",
+        "Day/night, weather, lighting and fire",
+        "Building blocks, doors, ladders, signs, beds",
+        "Redstone power, controls, repeaters and TNT",
+        "Rails, minecarts, boats and fishing",
+        "Achievements/statistics",
+        "Audio, particles and texture-pack support",
+        "Multiplayer assessment"
+      ],
+      "note": "Groups are a checklist, not a completion claim. Broad Beta parity remains unfinished."
+    },
+    {
+      "id": 3,
+      "requirement": "Configurable 2/4/6/9 views of XZW slices",
+      "status": "implemented_pending_full_visual_and_performance_verification"
+    },
+    {
+      "id": 4,
+      "requirement": "Z/C fourth-direction movement; Q drop; E inventory",
+      "status": "implemented_tests_passed_pending_interactive_validation"
+    },
+    {
+      "id": 5,
+      "requirement": "Conceptual 4D tutorial including multiple views",
+      "status": "18_bilingual_steps_implemented_unit_tested_pending_visual_validation"
+    },
+    {
+      "id": 6,
+      "requirement": "Chinese and English",
+      "status": "in_progress",
+      "remaining": [
+        "All dynamic HUD/toast text",
+        "New gameplay item/station labels",
+        "Visual glyph/layout verification"
+      ]
+    },
+    {
+      "id": 7,
+      "requirement": "Windows and Linux support",
+      "status": "in_progress",
+      "remaining": [
+        "Windows CI/build/package",
+        "Linux interactive runtime validation",
+        "Platform-specific setup documentation"
+      ],
+      "acceptance_update": "User accepts code support only for Windows; external tester will verify executable/runtime. Existing cross-build may finish, but runtime verification is no longer required from agent.",
+      "windows_handoff": {
+        "supporting_code": [
+          ".github/workflows/build.yml",
+          "scripts/prepare_windows_toolchain.py",
+          "scripts/build_windows.py",
+          "README.md"
+        ],
+        "cross_compile_evidence": "All Rust game/dependency crates compiled for x86_64-pc-windows-gnullvm; isolated final link failed on missing -lopengl32 import library. No game-source compile errors occurred.",
+        "cross_compile_log": "target/tooling/windows/build.log",
+        "cross_compile_result": "target/tooling/windows/build-result.json",
+        "follow_up": "Native Windows tester can use cargo build --release --locked with their normal Windows SDK. Experimental Linux cross-helper accepts --native-library-dir for an external graphics-capable Windows SDK.",
+        "native_runtime_verification": "Delegated to external tester per user instruction; not required from agent.",
+        "artifact": "No EXE/ZIP produced because the isolated link did not finish."
+      }
+    },
+    {
+      "id": 8,
+      "requirement": "New attractive 1080p video after features and >=30FPS verification",
+      "status": "pending",
+      "default_resolution": [
+        1920,
+        1080
+      ],
+      "note": "Existing user video preserved; not yet re-recorded for this expansion."
+    },
+    {
+      "id": 9,
+      "requirement": "Separate detailed1080p tutorial video covering controls/game modes andoptional4/6/9viewlayouts",
+      "status": "pending"
+    }
+  ],
+  "excluded": [
+    "Nether, Nether mobs and portal travel"
+  ],
+  "no_questions_until": "2026-10-30T09:21:19+08:00",
+  "accepted_loading": "User explicitly accepts the measured8.6second loading phase; prioritize gameplay frame times.",
+  "scope_updates": [
+    {
+      "instruction": "User excludes fishing, mobs, and multiplayer from remaining implementation work. Existing implementations are preserved. Mob-specific follow-ups, including pig riding, charged creepers and spawner spawning, are outside remaining scope."
+    },
+    {
+      "at_utc": "2026-10-30T15:12:39.719477+00:00",
+      "instruction": "Defer presentation-list item2 to next version EXCEPT explosion, block-breaking debris, splash and wake particles, which remain current scope.",
+      "deferred": [
+        "smoke particles",
+        "third-person held equipment and armor",
+        "third-person hurt/death poses",
+        "fullscreen shortcut/window behavior",
+        "ZIP texture-pack discovery/selection/preview"
+      ],
+      "retained": [
+        "explosion particles",
+        "block-breaking debris particles",
+        "splash particles",
+        "wake particles"
+      ],
+      "parallel_owners": {
+        "streaming_perf": "lighting/performance and runtime verification",
+        "camera_sky": "retained particles",
+        "environment_mechanics": "remaining gameplay and interaction/save parity",
+        "root": "integration, UI/localization/world management, videos"
+      }
+    },
+    {
+      "at_utc": "2026-10-30T16:33:15.431384+00:00",
+      "instruction": "User allows a modest deadline extension but asks for acceleration. Keep scope fixed, prioritize remaining fixes and integrated verification; no new exact deadline specified. Retain15-minute checkpoints and stagnation investigations."
+    }
+  ],
+  "reporting_policy": {
+    "interval_minutes": 15,
+    "last_checkpoint_utc": "2026-10-30T14:35:36.547634+00:00",
+    "next_checkpoint_utc": "2026-10-30T14:50:36.547634+00:00",
+    "required_contents": [
+      "Completed changes with concrete evidence",
+      "Current blockers and failed checks",
+      "Next actions"
+    ],
+    "stagnation_rule": "Investigate every active item with no concrete code/test/runtime/diagnostic progress in15minutes. Verify live process handles, identify blocker, then change approach or reassign.",
+    "scope": "Active Minecraft goal; clock checked during ongoing work and after interruptions."
+  },
+  "checkpoints": [
+    {
+      "at_utc": "2026-10-30T14:05:12.509414+00:00",
+      "comparison": "Immediate user-requested checkpoint against prior30minutes",
+      "verified_progress": [
+        "GPUlight identity reuse regression reproduced and fixed",
+        "Inset-door brightness4.515→88.590; now matches unobstructed control",
+        "Four repeated subsystem scans replaced by bounded lifecycle activation;96gameplay tests passed"
+      ],
+      "stalled_items": [
+        "No new moving-world/FPS report yet",
+        "Eviction-light-queue investigation agent was completed/idle; restarted with explicit followup_task"
+      ],
+      "next": [
+        "Run built fairness-fixed moving-world baseline afterGPUslot confirmation",
+        "Reproduce/fix partial-column eviction backlog"
+      ]
+    },
+    {
+      "at_utc": "2026-10-30T14:34:19.796259+00:00",
+      "verified_progress": [
+        "Atomic eviction reproduction319504obsoletejobs→0",
+        "GPUidentity andinset-facefixes proved",
+        "Provisionalcomputedlight display retainsunsettledfreshness gates;11lightingtests passed"
+      ],
+      "not_resolved": [
+        "Moving-world readiness/FPS stillfailed in gameplay-atomic-lighting.toml",
+        "Provisionaldatarelease24688building;runtimevalidationpending"
+      ],
+      "active_user_features": [
+        "Xpromotesdisplayedsideview; sourceimplemented",
+        "Side-basiscompass sourceimplemented; validationpending"
+      ]
+    }
+  ],
+  "requested_wrap_up": {
+    "requested_at_utc": "2026-10-30T14:35:36.547634+00:00",
+    "target_utc": "2026-10-30T16:35:36.547634+00:00",
+    "instruction": "Try to finish within2hours; preserve accepted scope and verification gates, report unresolved items honestly.",
+    "extension": "Modest flexibility authorized; finish as soon as verified, rather than expanding scope."
+  },
+  "resumed_2026_10_31": {
+    "build": "Compiles; all tests pass including GPU-only tests.",
+    "performance": "Native resolution, >=20 FPS target: cooled windowed 1920x1200 route had 0.16% frames above 50 ms (user acceptance <1%).",
+    "notes": "Seed/save migration finished, per-view compasses, fullscreen, display particles, ZIP texture packs, third-person armour/held item, item-use and survival-progression audits with tests, bilingual sweep, Windows cross-build, new intro and tutorial videos."
+  }
+}

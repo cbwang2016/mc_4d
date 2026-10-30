@@ -5,6 +5,10 @@ version.workspace = true
 license.workspace = true
 
 [dependencies]
+rustc-hash = "2.1"
 glam.workspace = true
 noise.workspace = true
 serde.workspace = true
+
+[dev-dependencies]
+toml.workspace = true

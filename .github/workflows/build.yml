@@ -1,0 +1,27 @@
+name: Linux and Windows
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Linux audio build dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev pkg-config
+      - name: Test simulation, saves, input and shaders
+        run: cargo test --workspace --locked --release
+      - name: Build game
+        run: cargo build --release --locked
+      - name: Verify command line
+        shell: bash
+        run: ./target/release/mc4d --help

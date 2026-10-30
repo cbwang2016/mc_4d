@@ -1,0 +1,17 @@
+Noto Sans SC Regular
+
+This is a static regular-weight subset of Noto Sans CJK SC, distributed under
+SIL Open Font License 1.1 (see LICENSE-Noto). The CJK outlines and metrics are
+unchanged. Its static CFF2 outlines were converted to CFF1 with fontTools for
+compatibility with ab_glyph's sign-text rasterizer; the original static CFF2
+file returned glyph IDs but no rasterizable outlines in that code path.
+
+Conversion (fontTools):
+  font = TTFont(path, recalcBBoxes=False)
+  convertCFF2ToCFF(font)
+  font.save(path)
+
+Precomputed glyph bounds are retained: recomputing hhea bounds while the
+converter renames CFF charstrings to CID names causes an intermediate-name
+lookup failure. The result is verified by actual English/Chinese glyph
+rasterization in sign_textures tests, not only by character-map presence.

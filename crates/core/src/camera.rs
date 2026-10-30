@@ -65,6 +65,15 @@ impl Orientation {
         }
     }
 
+    /// Adopt a displayed slice's horizontal frame without changing pitch.
+    /// An explicit view change cancels any earlier animated snap/flip target.
+    pub fn set_heading_basis(&mut self, basis: Basis) {
+        let horizontal=|v:Vec4|Vec3::new(v.x,v.z,v.w);
+        self.heading=Quat::from_mat3(&Mat3::from_cols(horizontal(basis.right),horizontal(basis.forward_h),horizontal(basis.ana))).normalize();
+        self.anim=None;
+        self.idle_slice=0.0;
+    }
+
     fn rotate_local(&mut self, axis: Vec3, angle: f32) {
         self.heading = (self.heading * Quat::from_axis_angle(axis, angle)).normalize();
     }
