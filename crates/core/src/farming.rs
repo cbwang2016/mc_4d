@@ -6,7 +6,9 @@ use std::collections::{HashSet,VecDeque};
 
 pub const RANDOM_TICK_PROBABILITY:f64=80.0/(16.0*128.0*16.0);
 pub const CRITICAL_BLOCKS:&[u8]=&[block::FARMLAND,block::CROPS,block::SAPLING,block::CACTUS,block::REEDS];
-#[derive(Clone,Copy,Debug)]pub struct PlantLight{pub level:u8,pub sees_sky:bool}
+#[derive(Clone,Copy,Debug)]pub struct PlantLight{pub level:u8,pub sees_sky:bool,
+ /// Undimmed max(block,sky), as Beta's canBlockStay survival checks ignore daylight.
+ pub full:u8}
 #[derive(Clone,Copy,Debug,PartialEq)]pub enum TickAction{Stay,Defer,Replace(BlockState),Break,GrowTree(u8),GrowColumn,Spread([Option<IVec4>;4])}
 pub fn needs_tick(s:BlockState)->bool{CRITICAL_BLOCKS.contains(&s.id)||s.id==block::LEAVES&&s.metadata&8!=0}
 
@@ -85,7 +87,7 @@ pub fn tick(pos:IVec4,state:BlockState,get:&impl Fn(IVec4)->Option<BlockState>,l
    else if get(pos+IVec4::Y).is_some_and(|s|s.id==block::CROPS){Stay}else{Replace(block::DIRT.into())}
   },
   block::CROPS|block::SAPLING=>{
-   let Some(here)=light(pos)else{return Defer};if here.level<8&&!here.sees_sky{return Break}
+   let Some(here)=light(pos)else{return Defer};if here.full<8&&!here.sees_sky{return Break}
    let Some(above)=light(pos+IVec4::Y)else{return Defer};if above.level<9{return Stay}
    if state.id==block::CROPS{
     if state.metadata>=7{return Stay}let chance=(100.0/crop_fertility(pos,get))as u32;
@@ -125,14 +127,16 @@ pub fn tick(pos:IVec4,state:BlockState,get:&impl Fn(IVec4)->Option<BlockState>,l
  }
  #[test]fn hydration_drying_crop_light_and_growth_match_old_rules(){
   let mut map=HashMap::new();map.insert(IVec4::ZERO,BlockState::new(block::FARMLAND,0));map.insert(IVec4::X,block::WATER.into());map.insert(IVec4::Y,BlockState::new(block::CROPS,0));
-  let get=|p|Some(*map.get(&p).unwrap_or(&block::AIR.into()));let bright=|_|Some(PlantLight{level:15,sees_sky:true});
+  let get=|p|Some(*map.get(&p).unwrap_or(&block::AIR.into()));let bright=|_|Some(PlantLight{level:15,sees_sky:true,full:15});
   assert_eq!(tick(IVec4::ZERO,map[&IVec4::ZERO],&get,&bright,false,&mut|_|0),TickAction::Replace(BlockState::new(block::FARMLAND,7)));
   assert_eq!(tick(IVec4::Y,map[&IVec4::Y],&get,&bright,false,&mut|_|0),TickAction::Replace(BlockState::new(block::CROPS,1)));
-  let night=|_|Some(PlantLight{level:4,sees_sky:true});assert_eq!(tick(IVec4::Y,map[&IVec4::Y],&get,&night,false,&mut|_|0),TickAction::Stay);
-  let dark=|_|Some(PlantLight{level:0,sees_sky:false});assert_eq!(tick(IVec4::Y,map[&IVec4::Y],&get,&dark,false,&mut|_|0),TickAction::Break);
+  let night=|_|Some(PlantLight{level:4,sees_sky:true,full:15});assert_eq!(tick(IVec4::Y,map[&IVec4::Y],&get,&night,false,&mut|_|0),TickAction::Stay);
+  let dark=|_|Some(PlantLight{level:0,sees_sky:false,full:0});assert_eq!(tick(IVec4::Y,map[&IVec4::Y],&get,&dark,false,&mut|_|0),TickAction::Break);
+  // Undimmed light decides survival: a crop under an overhang lives through the night.
+  let overhang=|_|Some(PlantLight{level:3,sees_sky:false,full:14});assert_eq!(tick(IVec4::Y,map[&IVec4::Y],&get,&overhang,false,&mut|_|0),TickAction::Stay);
  }
  #[test]fn saplings_need_growth_mark_and_reeds_reject_later_sand_rule(){
-  let get=|p:IVec4|Some(if p==IVec4::NEG_Y{block::DIRT.into()}else if p==IVec4::ZERO{block::SAPLING.into()}else{block::AIR.into()});let light=|_|Some(PlantLight{level:15,sees_sky:true});
+  let get=|p:IVec4|Some(if p==IVec4::NEG_Y{block::DIRT.into()}else if p==IVec4::ZERO{block::SAPLING.into()}else{block::AIR.into()});let light=|_|Some(PlantLight{level:15,sees_sky:true,full:15});
   assert_eq!(tick(IVec4::ZERO,BlockState::new(block::SAPLING,2),&get,&light,false,&mut|_|0),TickAction::Replace(BlockState::new(block::SAPLING,10)));
   assert_eq!(tick(IVec4::ZERO,BlockState::new(block::SAPLING,10),&get,&light,false,&mut|_|0),TickAction::GrowTree(2));
   let sand=|p:IVec4|Some(if p==IVec4::NEG_Y{block::SAND.into()}else{block::WATER.into()});assert_eq!(supported(IVec4::ZERO,block::REEDS.into(),&sand),Some(false));

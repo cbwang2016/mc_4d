@@ -219,35 +219,18 @@ impl Game {
                 self.redstone.scans.front_mut().unwrap().2 += 1;
             }
             if power::COMPONENTS.contains(&state.id) {
-                self.redstone.queue(c * 16 + local);
-            }
-        }
-        for _ in 0..128 {
-            let Ok(change) = self.redstone.changes.try_recv() else {
-                break;
-            };
-            if self
-                .redstone
-                .scheduled
-                .get(&change.position)
-                .is_some_and(|(_, id)| *id != change.after.id)
-            {
-                self.redstone.scheduled.remove(&change.position);
-            }
-            for a in std::iter::once(IVec4::ZERO).chain(power::NEIGHBORS) {
-                for b in std::iter::once(IVec4::ZERO).chain(power::NEIGHBORS) {
-                    let p = change.position + a + b;
-                    if self
-                        .world
-                        .block(p)
-                        .is_some_and(|id| power::COMPONENTS.contains(&id))
-                    {
-                        self.redstone.queue(p);
-                    }
+                let p = c * 16 + local;
+                // A device that was already powered when saved must not fire
+                // again merely because its chunk was loaded.
+                if matches!(state.id, block::DISPENSER | block::NOTE_BLOCK | block::TNT) {
+                    let powered = self.block_powered(p)
+                        || (state.id == block::DISPENSER && self.block_powered(p + IVec4::Y));
+                    self.redstone.powered.insert(p, powered);
                 }
+                self.redstone.queue(p);
             }
         }
-        // Contacts press immediately; releasing a plate is checked on its20-tick timer.
+        // Contacts press immediately; releasing a plate is checked on its 20-tick timer.
         let plates: Vec<_> = self.redstone.plates.iter().copied().collect();
         if !plates.is_empty() {
             for offset in 0..plates.len().min(64) {
@@ -259,63 +242,6 @@ impl Game {
                 }
             }
             self.redstone.plate_cursor = (self.redstone.plate_cursor + 64) % plates.len();
-        }
-        for _ in 0..128 {
-            let Some(p) = self.redstone.dirty.pop_front() else {
-                break;
-            };
-            self.redstone.queued.remove(&p);
-            let Some(s) = self.world.block_state(p) else {
-                continue;
-            };
-            match s.id {
-                block::REDSTONE_WIRE => {
-                    let next = power::wire_power(p, &|p| self.world.block_state(p));
-                    if next != s.metadata {
-                        self.world.set_block_state(p, BlockState::new(s.id, next));
-                    }
-                }
-                block::REDSTONE_TORCH | block::REDSTONE_TORCH_OFF => {
-                    let input = power::torch_input(p, s, &|p| self.world.block_state(p));
-                    if (s.id == block::REDSTONE_TORCH) == input {
-                        self.redstone.schedule(p, s.id, 2);
-                    }
-                }
-                block::REPEATER | block::REPEATER_OFF => {
-                    let input = power::repeater_input(p, s, &|p| self.world.block_state(p));
-                    if (s.id == block::REPEATER) != input {
-                        self.redstone
-                            .schedule(p, s.id, power::repeater_delay(s.metadata));
-                    }
-                }
-                block::BUTTON => {
-                    if s.metadata & 8 != 0 {
-                        self.redstone.schedule(p, s.id, 20);
-                    }
-                }
-                block::WOOD_PRESSURE_PLATE | block::STONE_PRESSURE_PLATE => {
-                    self.redstone.plates.insert(p);
-                    self.update_plate(p, s);
-                }
-                block::WOOD_DOOR | block::IRON_DOOR => {
-                    let bottom = if s.metadata & 8 == 0 { p } else { p - IVec4::Y };
-                    let powered =
-                        self.block_powered(bottom) || self.block_powered(bottom + IVec4::Y);
-                    let previous = self.redstone.powered.insert(bottom, powered);
-                    if powered || previous == Some(true) || s.id == block::IRON_DOOR {
-                        self.set_door_open(bottom, powered);
-                    }
-                }
-                block::DISPENSER | block::NOTE_BLOCK | block::TNT => {
-                    let powered = self.block_powered(p)
-                        || (s.id == block::DISPENSER && self.block_powered(p + IVec4::Y));
-                    if powered && self.redstone.powered.get(&p) != Some(&true) {
-                        self.redstone.events.push(p);
-                    }
-                    self.redstone.powered.insert(p, powered);
-                }
-                _ => {}
-            }
         }
         for _ in 0..64 {
             let Some((p, id)) = self.redstone.next_timer() else {
@@ -372,6 +298,105 @@ impl Game {
                 _ => {}
             }
         }
+        // Torch, dust and device reactions settle within the same frame instead
+        // of costing one rendered frame per hop. Work stays bounded per frame.
+        for _ in 0..4 {
+            if self.drain_redstone_changes() + self.process_redstone_dirty() == 0 {
+                break;
+            }
+        }
+    }
+    fn drain_redstone_changes(&mut self) -> usize {
+        let mut work = 0;
+        for _ in 0..128 {
+            let Ok(change) = self.redstone.changes.try_recv() else {
+                break;
+            };
+            work += 1;
+            if self
+                .redstone
+                .scheduled
+                .get(&change.position)
+                .is_some_and(|(_, id)| *id != change.after.id)
+            {
+                self.redstone.scheduled.remove(&change.position);
+            }
+            for a in std::iter::once(IVec4::ZERO).chain(power::NEIGHBORS) {
+                for b in std::iter::once(IVec4::ZERO).chain(power::NEIGHBORS) {
+                    let p = change.position + a + b;
+                    if self
+                        .world
+                        .block(p)
+                        .is_some_and(|id| power::COMPONENTS.contains(&id))
+                    {
+                        self.redstone.queue(p);
+                    }
+                }
+            }
+        }
+        work
+    }
+    fn process_redstone_dirty(&mut self) -> usize {
+        let mut work = 0;
+        for _ in 0..128 {
+            let Some(p) = self.redstone.dirty.pop_front() else {
+                break;
+            };
+            work += 1;
+            self.redstone.queued.remove(&p);
+            let Some(s) = self.world.block_state(p) else {
+                continue;
+            };
+            match s.id {
+                block::REDSTONE_WIRE => {
+                    let changed = power::wire_network(p, 4096, &|p| self.world.block_state(p));
+                    for (q, next) in changed {
+                        self.world.set_block_state(q, BlockState::new(s.id, next));
+                    }
+                }
+                block::REDSTONE_TORCH | block::REDSTONE_TORCH_OFF => {
+                    let input = power::torch_input(p, s, &|p| self.world.block_state(p));
+                    if (s.id == block::REDSTONE_TORCH) == input {
+                        self.redstone.schedule(p, s.id, 2);
+                    }
+                }
+                block::REPEATER | block::REPEATER_OFF => {
+                    let input = power::repeater_input(p, s, &|p| self.world.block_state(p));
+                    if (s.id == block::REPEATER) != input {
+                        self.redstone
+                            .schedule(p, s.id, power::repeater_delay(s.metadata));
+                    }
+                }
+                block::BUTTON => {
+                    if s.metadata & 8 != 0 {
+                        self.redstone.schedule(p, s.id, 20);
+                    }
+                }
+                block::WOOD_PRESSURE_PLATE | block::STONE_PRESSURE_PLATE => {
+                    self.redstone.plates.insert(p);
+                    self.update_plate(p, s);
+                }
+                block::WOOD_DOOR | block::IRON_DOOR => {
+                    let bottom = if s.metadata & 8 == 0 { p } else { p - IVec4::Y };
+                    let powered =
+                        self.block_powered(bottom) || self.block_powered(bottom + IVec4::Y);
+                    let previous = self.redstone.powered.insert(bottom, powered);
+                    if powered || previous == Some(true) || s.id == block::IRON_DOOR {
+                        self.set_door_open(bottom, powered);
+                    }
+                }
+                block::DISPENSER | block::NOTE_BLOCK | block::TNT => {
+                    let powered = self.block_powered(p)
+                        || (s.id == block::DISPENSER && self.block_powered(p + IVec4::Y));
+                    if powered && self.redstone.powered.get(&p) != Some(&true) {
+                        self.redstone.events.push(p);
+                    }
+                    self.redstone.powered.insert(p, powered);
+                }
+                _ => {}
+            }
+        }
+        work
     }
 }
 
@@ -490,5 +515,79 @@ mod tests {
         g.dropped_items.clear();
         steps(&mut g, 20);
         assert_eq!(g.world.block_state(p).unwrap().metadata, 0);
+    }
+
+    #[test]
+    fn long_dust_lines_and_loops_settle_within_one_frame() {
+        let (mut g, p) = circuit();
+        let lever = p - IVec4::X * 6;
+        g.world.set_block_state(lever, BlockState::new(block::LEVER, 5));
+        // A U-shaped loop crossing X and W must neither lag nor self-sustain.
+        let mut line = Vec::new();
+        for x in -5..=5 { line.push(p + IVec4::X * x); }
+        for w in 1..=2 { line.push(p + IVec4::X * 5 + IVec4::W * w); }
+        for x in (-5..=5).rev() { line.push(p + IVec4::X * x + IVec4::W * 3); }
+        line.push(p - IVec4::X * 5 + IVec4::W * 2);
+        line.push(p - IVec4::X * 5 + IVec4::W);
+        for &q in &line { g.world.set_block(q, block::REDSTONE_WIRE); }
+        g.update_redstone(0.0);
+        g.use_redstone(lever, g.world.block_state(lever).unwrap());
+        g.update_redstone(0.0);
+        assert_eq!(g.world.block_state(line[0]).unwrap().metadata, 15);
+        assert_eq!(g.world.block_state(line[10]).unwrap().metadata, 5);
+        assert_eq!(g.world.block_state(*line.last().unwrap()).unwrap().metadata, 14);
+        g.use_redstone(lever, g.world.block_state(lever).unwrap());
+        g.update_redstone(0.0);
+        assert!(line.iter().all(|&q| g.world.block_state(q).unwrap().metadata == 0));
+    }
+    #[test]
+    fn torch_clock_toggles_every_two_ticks_until_burnout() {
+        let (mut g, p) = circuit();
+        g.world.set_block(p, block::STONE);
+        let torch = p + IVec4::X;
+        g.world.set_block_state(torch, BlockState::new(block::REDSTONE_TORCH, 1));
+        g.world.set_block(torch + IVec4::Y, block::REDSTONE_WIRE);
+        g.world.set_block(p + IVec4::Y, block::REDSTONE_WIRE);
+        g.update_redstone(0.0);
+        let mut states = Vec::new();
+        for _ in 0..12 {
+            g.update_redstone(0.05);
+            states.push(g.world.block(torch) == Some(block::REDSTONE_TORCH));
+        }
+        assert_eq!(states, [true, false, false, true, true, false, false, true, true, false, false, true]);
+        steps(&mut g, 40);
+        assert_eq!(g.world.block(torch), Some(block::REDSTONE_TORCH_OFF), "rapid toggling burns out");
+    }
+    #[test]
+    fn dust_passing_a_repeater_side_still_runs_straight() {
+        let (mut g, p) = circuit();
+        g.world.set_block_state(p - IVec4::X, BlockState::new(block::LEVER, 5 | 8));
+        g.world.set_block(p, block::REDSTONE_WIRE);
+        // Repeater beside the dust, facing along X: not a dust connection.
+        g.world.set_block_state(p + IVec4::W, BlockState::new(block::REPEATER_OFF, power::repeater_metadata(IVec4::X)));
+        let door = p + IVec4::X;
+        g.world.set_block_state(door, BlockState::new(block::IRON_DOOR, 0));
+        g.world.set_block_state(door + IVec4::Y, BlockState::new(block::IRON_DOOR, 8));
+        g.update_redstone(0.0);
+        steps(&mut g, 2);
+        assert_ne!(g.world.block_state(door).unwrap().metadata & 4, 0);
+    }
+    #[test]
+    fn loading_an_already_powered_dispenser_does_not_fire_it() {
+        let (mut g, _) = circuit();
+        let mut chunk = Chunk::from_dense(vec![AIR; CHUNK_VOLUME]);
+        let (lever, dispenser) = (IVec4::new(3, 3, 3, 3), IVec4::new(4, 3, 3, 3));
+        chunk.set_state(lever, BlockState::new(block::LEVER, 5 | 8));
+        chunk.set_state(dispenser, BlockState::new(block::DISPENSER, 0));
+        let c = IVec4::new(0, 2, 0, 0);
+        g.world.insert_chunk(c, chunk);
+        for _ in 0..80 { g.update_redstone(0.05); }
+        assert!(g.take_powered_events().is_empty());
+        let lever = c * 16 + lever;
+        g.use_redstone(lever, g.world.block_state(lever).unwrap());
+        steps(&mut g, 2);
+        g.use_redstone(lever, g.world.block_state(lever).unwrap());
+        steps(&mut g, 2);
+        assert_eq!(g.take_powered_events(), vec![c * 16 + dispenser]);
     }
 }

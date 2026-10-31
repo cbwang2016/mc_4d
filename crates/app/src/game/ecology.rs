@@ -28,6 +28,7 @@ pub(super) fn eligible(id: u8) -> bool {
         id,
         block::GRASS | block::DANDELION | block::ROSE | block::BROWN_MUSHROOM | block::RED_MUSHROOM
     ) || id == block::SNOW_LAYER
+        || id == block::ICE
         || block::fluid(id).is_some_and(|(k, _)| k == block::FluidKind::Lava)
 }
 impl Game {
@@ -265,6 +266,7 @@ impl Game {
                         e.lightning,
                     ),
                     sees_sky: s == 15,
+                    full: b.max(s),
                 })
             };
             let mut rng = self.rng;
@@ -308,10 +310,12 @@ impl Game {
                     e.lightning,
                 );
                 let mushroom = matches!(state.id, block::BROWN_MUSHROOM | block::RED_MUSHROOM);
+                // Flower survival reads undimmed light, so shaded flowers
+                // are not uprooted every night.
                 if if mushroom {
                     light > 13
                 } else {
-                    light < 8 && sky < 15
+                    b.max(sky) < 8 && sky < 15
                 } {
                     self.world.set_block(p, AIR);
                     self.spawn_block_loot(p, state, mc4d_core::loot::DropCause::Natural);
@@ -329,6 +333,13 @@ impl Game {
             if let Some(target) = target {
                 self.ignite(target);
             }
+        } else if state.id == block::ICE
+            && self.world.fresh_light_at(p).is_some_and(|(light, _)| {
+                light > 11 - block::light_opacity(block::ICE.into())
+            })
+        {
+            // Beta ice melts back into still water near bright block light.
+            self.world.set_block(p, block::WATER);
         } else if state.id == block::SNOW_LAYER
             && self
                 .world
@@ -458,5 +469,28 @@ mod tests {
         g.ambient_block_tick(p);
         assert_eq!(g.world.block(p), Some(AIR));
         assert_eq!(g.dropped_items.len(), 1);
+    }
+    #[test]
+    fn shaded_flowers_survive_night_and_ice_melts_beside_torches() {
+        let mut g = outdoor();
+        g.environment.world_ticks = 18000;
+        let p = IVec4::splat(8);
+        g.world.set_block(p - IVec4::Y, block::GRASS);
+        g.world.set_block(p, block::ROSE);
+        g.world.set_block(p + IVec4::Y, block::STONE);
+        let ice = p + IVec4::X * 4;
+        let dark_ice = p - IVec4::X * 4;
+        g.world.set_block(ice, block::ICE);
+        g.world.set_block(dark_ice, block::ICE);
+        g.world.set_block(ice + IVec4::X, block::TORCH);
+        settle(&mut g);
+        g.ambient_block_tick(p);
+        assert_eq!(g.world.block(p), Some(block::ROSE));
+        assert!(eligible(block::ICE));
+        g.ambient_block_tick(ice);
+        assert_eq!(g.world.block(ice), Some(block::WATER));
+        g.ambient_block_tick(dark_ice);
+        assert_eq!(g.world.block(dark_ice), Some(block::ICE));
+        assert!(g.dropped_items.is_empty());
     }
 }

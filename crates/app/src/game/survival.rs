@@ -136,7 +136,8 @@ impl Game {
             return;
         }
         if self.body.pos.y < -32.0 { self.die("Void"); return; }
-        if self.body.in_water || self.flying { self.fall_distance = 0.0; }
+        // ea.c also clears fallDistance on every tick spent on a ladder.
+        if self.body.in_water || self.flying || self.body.ladder(&|p| self.world.block_state(p)).is_some() { self.fall_distance = 0.0; }
         else {
             self.fall_distance += (previous_y - self.body.pos.y).max(0.0);
             if self.body.on_ground {
@@ -282,6 +283,30 @@ hotbar=[]
         let restored: Level = toml::from_str(&toml::to_string(&level).unwrap()).unwrap();
         assert_eq!(restored.health, 7);
         assert_eq!(restored.armor[0].damage, 21);
+    }
+    #[test]
+    fn climbing_down_a_long_ladder_does_not_count_as_falling() {
+        let mut game=Game::menu_preview(7);
+        game.world.insert_chunk(IVec4::ZERO,mc4d_core::chunk::Chunk::uniform(block::AIR));
+        game.mode=GameMode::Survival;
+        for y in 1..15 {
+            game.world.set_block(IVec4::new(9,y,8,8),block::STONE);
+            game.world.set_block_state(IVec4::new(8,y,8,8),block::BlockState::new(block::LADDER,5));
+        }
+        game.world.set_block(IVec4::new(8,0,8,8),block::STONE);
+        game.body.pos=Vec4::new(8.5,14.0,8.5,8.5);
+        game.body.on_ground=false;
+        // Slide down the ladder at its capped speed, then land at its foot.
+        let mut y:f32=14.0;
+        while y>1.0 {
+            let previous=y;
+            y=(y-0.15).max(1.0);
+            game.body.pos.y=y;
+            game.update_survival(0.05,previous);
+        }
+        game.body.on_ground=true;
+        game.update_survival(0.05,1.0);
+        assert_eq!(game.health,20,"ea.c: a ladder resets fallDistance every tick");
     }
     #[test]
     fn open_door_airspace_does_not_suffocate_and_shallow_w_edge_lava_damages(){

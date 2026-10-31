@@ -385,7 +385,9 @@ impl Game {
             if !seen.insert(p) {
                 continue;
             }
-            if self.block_powered(p) {
+            // ag.a: the rail's own cell and the space above it; relayed rails
+            // are checked only at their own cell.
+            if self.block_powered(p) || distance == 0 && self.block_powered(p + IVec4::Y) {
                 return true;
             }
             if distance == 8 {
@@ -425,7 +427,8 @@ impl Game {
             .collect::<Vec<_>>()
         {
             for d in std::iter::once(IVec4::ZERO).chain(rails::DIRECTIONS) {
-                for y in -1..=1 {
+                // A torch under a rail's support block powers it from two below.
+                for y in -1..=if d == IVec4::ZERO { 2 } else { 1 } {
                     let p = change.position + d + IVec4::Y * y;
                     if self.world.chunks.get(&chunk_of(p)).is_some_and(|c| {
                         c.may_contain_any(&[block::RAIL, block::POWERED_RAIL, block::DETECTOR_RAIL])
@@ -675,12 +678,29 @@ impl Game {
                         }
                     }
                     if v.kind == VehicleKind::FurnaceCart && v.fuel > 0 {
+                        // xb.b: the push follows the cart's motion around
+                        // curves and is cancelled when the cart rolls back.
+                        if v.push.length_squared() > 0.0001 && moving.length_squared() > 0.001 {
+                            v.push = if v.push.dot(moving) < 0.0 {
+                                Vec4::ZERO
+                            } else {
+                                moving.normalize()
+                            };
+                        }
                         v.fuel -= 1;
                         speed = speed * 0.8 + v.push.dot(direction) * 0.04;
                     }
                     let limit = 0.4 / direction.abs().max_element().max(0.00001);
                     speed = speed.clamp(-limit, limit);
-                    let desired = projected + tangent * (speed / horizontal_length);
+                    let mut desired = projected + tangent * (speed / horizontal_length);
+                    // Leaving the foot of a slope overshoots below the next
+                    // rail's support; land on that rail instead of the floor.
+                    let landing = desired.floor().as_ivec4();
+                    if self.world.block(landing).is_some_and(block::is_solid)
+                        && self.world.block(landing + IVec4::Y).is_some_and(rails::is_rail)
+                    {
+                        desired.y = landing.y as f32 + 1.0625;
+                    }
                     if self
                         .world
                         .block(desired.floor().as_ivec4())
@@ -1311,4 +1331,83 @@ mod tests {
         g.vehicles.saved.entities.push(cart(VehicleKind::Boat,pos,Vec4::ZERO));g.vehicles_lightning(pos-Vec4::splat(3.0),pos+Vec4::splat(3.0));assert!(g.vehicles.saved.entities.is_empty());assert_eq!(g.dropped_items.iter().filter(|d|d.stack.block==item::ItemId::from(block::PLANKS)).map(|d|d.stack.count).sum::<u32>(),3);
     }
 
+
+    #[test]
+    fn cart_rolls_off_the_bottom_of_a_slope_onto_flat_track(){
+        let mut g=scene();
+        for x in 0..16 {g.world.set_block(IVec4::new(x,65,4,4),block::STONE);}
+        for x in 0..4 {g.world.set_block(IVec4::new(x,66,4,4),block::STONE);g.world.set_block_state(IVec4::new(x,67,4,4),BlockState::new(block::RAIL,1));}
+        g.world.set_block_state(IVec4::new(4,66,4,4),BlockState::new(block::RAIL,3));
+        for x in 5..16 {g.world.set_block_state(IVec4::new(x,66,4,4),BlockState::new(block::RAIL,1));}
+        for step in 0..10 {
+            g.vehicles.saved.entities.clear();
+            g.vehicles.saved.entities.push(cart(VehicleKind::Minecart,Vec4::new(1.0+step as f32*0.03,67.0625,4.5,4.5),Vec4::X*0.3));
+            g.vehicles.saved.riding=Some(0);
+            for _ in 0..30 {g.vehicle_tick();}
+            let v=&g.vehicles.saved.entities[0];
+            assert!(v.position.x>9.0,"cart stopped at the slope foot: {:?}",v.position);
+            assert!((v.position.y-66.0625).abs()<1e-3);
+        }
+    }
+    #[test]
+    fn furnace_cart_push_follows_the_track_around_curves(){
+        let mut g=scene();
+        for x in 0..6 {g.world.set_block(IVec4::new(x,65,4,4),block::STONE);}
+        for x in 0..5 {g.world.set_block_state(IVec4::new(x,66,4,4),BlockState::new(block::RAIL,1));}
+        g.world.set_block_state(IVec4::new(5,66,4,4),BlockState::new(block::RAIL,7));
+        for z in 5..32 {g.world.set_block(IVec4::new(5,65,z,4),block::STONE);g.world.set_block_state(IVec4::new(5,66,z,4),BlockState::new(block::RAIL,0));}
+        let mut f=cart(VehicleKind::FurnaceCart,Vec4::new(1.5,66.0625,4.5,4.5),Vec4::X*0.1);f.fuel=1000;f.push=Vec4::X;g.vehicles.saved.entities.push(f);
+        for _ in 0..150 {g.vehicle_tick();}
+        let v=&g.vehicles.saved.entities[0];
+        assert!(v.position.z>25.0,"furnace stopped pushing after the curve: {:?}",v.position);
+        assert!(v.push.z>0.9);
+    }
+    #[test]
+    fn powered_rail_reacts_to_a_torch_under_its_support_block(){
+        let mut g=scene();let p=IVec4::new(4,66,4,4);
+        g.world.set_block(p-IVec4::Y,block::STONE);g.world.set_block(p-IVec4::Y*3,block::STONE);
+        g.world.set_block_state(p,BlockState::new(block::POWERED_RAIL,1));
+        for _ in 0..3 {g.update_vehicles(0.05);}
+        assert!(!rails::powered(g.world.block_state(p).unwrap()));
+        g.world.set_block_state(p-IVec4::Y*2,BlockState::new(block::REDSTONE_TORCH,5));
+        assert!(g.block_powered(p));
+        for _ in 0..3 {g.update_vehicles(0.05);}
+        assert!(rails::powered(g.world.block_state(p).unwrap()));
+    }
+
+    #[test]
+    fn parallel_tracks_built_side_by_side_stay_straight(){
+        let mut g=scene();
+        for x in 0..2 {for w in 0..8 {g.world.set_block(IVec4::new(x,65,4,w),block::STONE);}}
+        for w in 0..8 {g.world.set_block_state(IVec4::new(0,66,4,w),BlockState::new(block::RAIL,0));}
+        for _ in 0..5 {g.update_vehicles(0.05);}
+        for w in 0..8 {assert_eq!(rails::shape(g.world.block_state(IVec4::new(0,66,4,w)).unwrap()),16);}
+        // Beside full rails a second line neither bends the first nor itself.
+        for w in 1..7 {g.world.set_block_state(IVec4::new(1,66,4,w),BlockState::new(block::RAIL,0));for _ in 0..3 {g.update_vehicles(0.05);}}
+        for w in 0..8 {assert_eq!(rails::shape(g.world.block_state(IVec4::new(0,66,4,w)).unwrap()),16,"rail 0,{w}");}
+        for w in 1..7 {assert_eq!(rails::shape(g.world.block_state(IVec4::new(1,66,4,w)).unwrap()),16,"rail 1,{w}");}
+    }
+
+    #[test]
+    fn powered_rail_is_also_powered_through_the_space_above_it(){
+        let mut g=scene();let p=IVec4::new(4,66,4,4);
+        g.world.set_block(p-IVec4::Y,block::STONE);
+        g.world.set_block_state(p,BlockState::new(block::POWERED_RAIL,0));
+        g.world.set_block_state(p+IVec4::X+IVec4::Y,BlockState::new(block::LEVER,5|8));
+        assert!(!g.block_powered(p));
+        for _ in 0..3 {g.update_vehicles(0.05);}
+        assert!(rails::powered(g.world.block_state(p).unwrap()));
+    }
+    #[test]
+    fn cart_follows_an_x_to_w_curve(){
+        let mut g=scene();
+        for x in 0..6 {g.world.set_block(IVec4::new(x,65,4,4),block::STONE);}
+        for x in 0..5 {g.world.set_block_state(IVec4::new(x,66,4,4),BlockState::new(block::RAIL,1));}
+        g.world.set_block_state(IVec4::new(5,66,4,4),BlockState::new(block::RAIL,21));
+        for w in 5..14 {g.world.set_block(IVec4::new(5,65,4,w),block::STONE);g.world.set_block_state(IVec4::new(5,66,4,w),BlockState::new(block::RAIL,16));}
+        g.vehicles.saved.entities.push(cart(VehicleKind::Minecart,Vec4::new(1.5,66.0625,4.5,4.5),Vec4::X*0.3));g.vehicles.saved.riding=Some(0);
+        for _ in 0..40 {g.vehicle_tick();}
+        let v=&g.vehicles.saved.entities[0];
+        assert!(v.position.w>9.0&&(v.position.x-5.5).abs()<1e-3&&(v.position.y-66.0625).abs()<1e-3,"{:?}",v.position);
+    }
 }

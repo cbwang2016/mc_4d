@@ -92,6 +92,7 @@ impl Game {
                 e.lightning,
             ),
             sees_sky: sky == 15,
+            full: block.max(sky),
         })
     }
     pub(super) fn update_farming(&mut self, dt: f32) {
@@ -124,7 +125,7 @@ impl Game {
                 self.farming.scans.push_back((c, event.identity, 0));
             }
         }
-        for _ in 0..128 {
+        for _ in 0..1024 {
             let Ok(change) = self.farming.changes.try_recv() else {
                 break;
             };
@@ -135,6 +136,7 @@ impl Game {
             for d in [
                 IVec4::ZERO,
                 IVec4::Y,
+                IVec4::NEG_Y,
                 IVec4::X,
                 IVec4::NEG_X,
                 IVec4::Z,
@@ -142,7 +144,16 @@ impl Game {
                 IVec4::W,
                 IVec4::NEG_W,
             ] {
-                self.farming.support(change.position + d);
+                let p = change.position + d;
+                // Only plants and farmland react; unrelated cells would otherwise
+                // flood the bounded queue and delay real support checks.
+                if self
+                    .world
+                    .block(p)
+                    .is_some_and(|id| plant(id) || id == block::FARMLAND)
+                {
+                    self.farming.support(p);
+                }
             }
             if change.before.id == block::LOG && change.after.id != block::LOG {
                 self.farming.leaf_scans.push_back((change.position, 4, 0));
@@ -220,7 +231,7 @@ impl Game {
                     .set_block_state(p, BlockState::new(s.id, s.metadata | 8));
             }
         }
-        for _ in 0..64 {
+        for _ in 0..1024 {
             let Some(p) = self.farming.supports.pop_front() else {
                 break;
             };
@@ -537,5 +548,63 @@ mod tests {
         game.world.set_block(p, block::CACTUS);
         game.update_farming(0.0);
         assert_eq!(game.world.block(p), Some(block::CACTUS));
+    }
+    #[test]
+    fn solid_block_placed_on_farmland_reverts_it_to_dirt() {
+        let (mut game, p) = garden();
+        game.world.set_block(p, block::FARMLAND);
+        game.update_farming(0.0);
+        game.world.set_block(p + IVec4::Y, block::STONE);
+        game.update_farming(0.0);
+        assert_eq!(game.world.block(p), Some(block::DIRT));
+    }
+    #[test]
+    fn busy_edit_frames_do_not_starve_plant_support_checks() {
+        let (mut game, p) = garden();
+        game.world.set_block(p - IVec4::Y, block::DIRT);
+        game.world.set_block(p, block::DANDELION);
+        game.update_farming(0.0);
+        for frame in 0..12 {
+            for i in 0..256 {
+                let q = IVec4::new(i % 16, 0, i / 16, 0);
+                game.world
+                    .set_block(q, if frame % 2 == 0 { block::STONE } else { AIR });
+            }
+            if frame == 10 {
+                game.world.set_block(p - IVec4::Y, AIR);
+            }
+            game.update_farming(0.05);
+        }
+        assert_eq!(game.world.block(p), Some(AIR));
+    }
+    #[test]
+    fn shaded_sapling_survives_the_night() {
+        let mut game = Game::menu_preview(7);
+        let column: Vec<_> = (0..mc4d_core::chunk::WORLD_CHUNKS_Y)
+            .map(|y| IVec4::new(0, y, 0, 0))
+            .collect();
+        for &c in &column {
+            game.world.insert_chunk(c, Chunk::uniform(AIR));
+        }
+        let p = IVec4::splat(8);
+        game.world.set_block(p - IVec4::Y, block::DIRT);
+        game.world.set_block(p + IVec4::Y, block::STONE);
+        game.world
+            .set_block_state(p, BlockState::new(block::SAPLING, 0));
+        let start = std::time::Instant::now();
+        while !game.world.lighting_ready(&column) {
+            game.world.update_lighting(&column, 128);
+            assert!(start.elapsed().as_secs() < 10);
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        game.environment.world_ticks = 18000;
+        let sky = game.world.fresh_light_at(p).unwrap().1;
+        assert!((8..15).contains(&sky));
+        game.update_farming(0.0);
+        game.farming.due.clear();
+        game.farming.scheduled.clear();
+        game.farming.schedule(p, 0);
+        game.update_farming(0.0);
+        assert_eq!(game.world.block(p), Some(block::SAPLING));
     }
 }

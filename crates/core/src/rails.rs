@@ -76,9 +76,31 @@ pub fn neighbor(cell: IVec4, d: IVec4, at: &impl Fn(IVec4) -> Option<BlockState>
         .into_iter()
         .find(|&p| at(p).is_some_and(|s| is_rail(s.id)))
 }
+/// Horizontal directions joined by a shape's two ends.
+fn links(code: u8) -> [IVec4; 2] {
+    let (a, b) = endpoints(code);
+    [a, b].map(|e| IVec4::new((e.x * 2.0) as i32, 0, (e.z * 2.0) as i32, (e.w * 2.0) as i32))
+}
+fn points_to(q: IVec4, toward: IVec4, at: &impl Fn(IVec4) -> Option<BlockState>) -> bool {
+    at(q).is_some_and(|s| is_rail(s.id) && links(shape(s)).contains(&toward))
+}
+/// Count of a rail's ends whose neighbour links back (xb.f connected tracks).
+fn mutual_links(cell: IVec4, state: BlockState, at: &impl Fn(IVec4) -> Option<BlockState>) -> usize {
+    links(shape(state))
+        .into_iter()
+        .filter(|&d| neighbor(cell, d, at).is_some_and(|q| points_to(q, -d, at)))
+        .count()
+}
 pub fn connected_shape(cell:IVec4,state:BlockState,at:&impl Fn(IVec4)->Option<BlockState>)->u8{connected_shape_powered(cell,state,false,at)}
 pub fn connected_shape_powered(cell: IVec4,state: BlockState,powered:bool,at: &impl Fn(IVec4) -> Option<BlockState>) -> u8 {
-    let n = DIRECTIONS.map(|d| neighbor(cell, d, at));
+    // xb.c: a neighbour joins only when it already leads here or both rails
+    // still have a free end, so full tracks laid side by side stay straight.
+    let free = mutual_links(cell, state, at) < 2;
+    let n = DIRECTIONS.map(|d| {
+        neighbor(cell, d, at).filter(|&q| {
+            points_to(q, -d, at) || free && at(q).is_some_and(|s| mutual_links(q, s, at) < 2)
+        })
+    });
     let curves = state.id == block::RAIL;
     let choices: [(usize, usize, u8); 15] = [
         (0, 1, 0),
@@ -155,7 +177,7 @@ mod tests {
     #[test]
     fn native_t_junction_changes_curve_with_power_in_xz_and_xw(){
         let state=BlockState::new(block::RAIL,0);
-        let xz=|p|[IVec4::ZERO,IVec4::Z,-IVec4::Z,IVec4::X].contains(&p).then_some(state);
+        let xz=|p|if p==IVec4::X{Some(BlockState::new(block::RAIL,1))}else{[IVec4::ZERO,IVec4::Z,-IVec4::Z].contains(&p).then_some(state)};
         assert_eq!(connected_shape_powered(IVec4::ZERO,state,false,&xz),6);assert_eq!(connected_shape_powered(IVec4::ZERO,state,true,&xz),9);
         let xw=|p|[IVec4::ZERO,IVec4::X,-IVec4::X,IVec4::W].contains(&p).then_some(state);
         assert_eq!(connected_shape_powered(IVec4::ZERO,state,false,&xw),19);assert_eq!(connected_shape_powered(IVec4::ZERO,state,true,&xw),21);
@@ -194,5 +216,23 @@ mod tests {
             assert_eq!(shape(on), code);
             assert_eq!(with_power(on, false), s);
         }
+    }
+    #[test]
+    fn full_track_ignores_a_side_rail_but_a_free_end_joins_it() {
+        let straight = BlockState::new(block::RAIL, 16);
+        let lone = BlockState::new(block::RAIL, 0);
+        let at = |p: IVec4| {
+            if p == IVec4::W || p == -IVec4::W {
+                Some(straight)
+            } else if p == IVec4::X {
+                Some(lone)
+            } else {
+                None
+            }
+        };
+        assert_eq!(connected_shape(IVec4::ZERO, straight, &at), 16);
+        assert_eq!(connected_shape(IVec4::X, lone, &|p| if p == IVec4::ZERO { Some(straight) } else { at(p) }), 0);
+        let end = |p: IVec4| if p == IVec4::W { Some(straight) } else if p == IVec4::X { Some(lone) } else { None };
+        assert_eq!(connected_shape(IVec4::ZERO, straight, &end), 19);
     }
 }

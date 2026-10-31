@@ -634,17 +634,19 @@ impl Game {
                 _ => None,
             };
             if let Some(id) = drop {
-                let count = if c.kind == CreatureKind::Sheep {
-                    1
-                } else {
-                    count
+                let count = match c.kind {
+                    CreatureKind::Sheep => 1,
+                    // Squid drops rand(3)+1 ink sacs, never none.
+                    CreatureKind::Squid => count + 1,
+                    _ => count,
                 };
                 for _ in 0..count {
                     self.spawn_drop(Slot::new(id, 1), c.body.pos, Vec4::Y * 2.0, 0.5);
                 }
             }
             if c.kind == CreatureKind::Skeleton {
-                for _ in 0..count {
+                // Bones are an independent rand(3) roll, not the arrow count.
+                for _ in 0..(self.rand() * 3.0) as u32 {
                     self.spawn_drop(Slot::new(item::BONE, 1), c.body.pos, Vec4::Y * 2.0, 0.5);
                 }
             }
@@ -1268,6 +1270,33 @@ mod tests {
         assert!(restored.tamed && restored.sitting);
         assert_eq!(restored.health, 18);
         assert_eq!(restored.kind, CreatureKind::Wolf);
+    }
+
+    #[test]
+    fn squid_always_drop_ink_and_skeleton_bones_roll_separately() {
+        let mut g = Game::menu_preview(7);
+        let mut squid = Vec::new();
+        let mut uncorrelated = false;
+        for _ in 0..200 {
+            g.dropped_items.clear();
+            g.spawn_creature(CreatureKind::Squid, Vec4::splat(8.0));
+            g.spawn_creature(CreatureKind::Skeleton, Vec4::splat(8.0));
+            for c in &mut g.creatures {
+                c.health = 0;
+            }
+            g.collect_dead_creatures();
+            let count = |id| {
+                g.dropped_items
+                    .iter()
+                    .filter(|d| d.stack.block == id)
+                    .count()
+            };
+            squid.push(count(item::INK_SAC));
+            uncorrelated |= count(item::ARROW) != count(item::BONE);
+        }
+        assert_eq!(squid.iter().min(), Some(&1));
+        assert_eq!(squid.iter().max(), Some(&3));
+        assert!(uncorrelated, "arrow and bone counts are independent rolls");
     }
 
     #[test]

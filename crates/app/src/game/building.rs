@@ -170,11 +170,19 @@ impl Game {
                     && self.world.set_block_state(hit.block, double);
             }
         }
-        // Item blocks redirect only a clicked snow layer into its own cell.
-        let pos = if targeted == block::SNOW_LAYER {
-            hit.block
+        // Item blocks redirect only a clicked snow layer into its own cell; the
+        // layer is replaced, so attachments then rest on the block beneath it.
+        let (pos, hit) = if targeted == block::SNOW_LAYER {
+            (
+                hit.block,
+                Hit {
+                    block: hit.block - IVec4::Y,
+                    normal: IVec4::Y,
+                    ..hit
+                },
+            )
         } else {
-            hit.block + hit.normal
+            (hit.block + hit.normal, hit)
         };
         if state.id == block::SLAB
             && self
@@ -622,9 +630,13 @@ impl Game {
                     && self.world.block(bottom) == Some(state.id)
                     && self.world.block(bottom + IVec4::Y) == Some(state.id)
             } else if state.id == block::BED {
-                self.full_support(pos - IVec4::Y)
-                    && paired(pos, state)
-                        .is_some_and(|other| self.world.block(other) == Some(block::BED))
+                // kt.b only checks the other half; beds never need ground.
+                paired(pos, state).is_some_and(|other| self.world.block(other) == Some(block::BED))
+            } else if state.id == block::CAKE {
+                // th.f: cake stays only on solid material and drops nothing.
+                self.world
+                    .block(pos - IVec4::Y)
+                    .is_some_and(mc4d_core::ecology::material_blocks_movement)
             } else if state.id == block::LADDER {
                 self.full_support(pos + shapes::wall_support(state.metadata))
             } else if matches!(
@@ -862,6 +874,57 @@ mod tests {
                 .iter()
                 .any(|d| d.stack.block == item::ItemId::from(block::LADDER))
         );
+    }
+    #[test]
+    fn cake_vanishes_without_ground_but_beds_ignore_it() {
+        let (mut game, base, hit) = arena();
+        assert!(game.place_building(hit, Slot::new(item::CAKE_ITEM, 1)));
+        game.world.set_block(base - IVec4::Y, AIR);
+        for _ in 0..8 {
+            game.update_building();
+        }
+        assert_eq!(game.world.block(base), Some(AIR), "no floating cake");
+        assert!(game.dropped_items.is_empty(), "cake drops nothing");
+        let (mut game, base, hit) = arena();
+        assert!(game.place_building(hit, Slot::new(item::BED_ITEM, 1)));
+        game.world.set_block(base - IVec4::Y, AIR);
+        game.world.set_block(base + IVec4::Z - IVec4::Y, AIR);
+        for _ in 0..8 {
+            game.update_building();
+        }
+        assert_eq!(game.world.block(base), Some(block::BED));
+        assert_eq!(game.world.block(base + IVec4::Z), Some(block::BED));
+        assert!(game.dropped_items.is_empty());
+    }
+    #[test]
+    fn clicking_a_snow_layer_replaces_it_with_a_floor_torch() {
+        let (mut game, base, _) = arena();
+        for normal in [IVec4::Y, IVec4::NEG_X, IVec4::W] {
+            game.world.set_block(base, block::SNOW_LAYER);
+            assert!(game.place_building(
+                Hit {
+                    block: base,
+                    normal,
+                    dist: 2.0
+                },
+                Slot::new(block::TORCH, 1)
+            ));
+            assert_eq!(
+                game.world.block_state(base),
+                Some(BlockState::new(block::TORCH, 5)),
+                "standing on the block under the snow"
+            );
+        }
+        game.world.set_block(base, block::SNOW_LAYER);
+        game.world.set_block(base - IVec4::Y, block::GLASS);
+        assert!(!game.place_building(
+            Hit {
+                block: base,
+                normal: IVec4::Y,
+                dist: 2.0
+            },
+            Slot::new(block::TORCH, 1)
+        ));
     }
     #[test]
     fn sign_editor_payload_and_text_persist_with_unicode_limits() {

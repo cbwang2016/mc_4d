@@ -103,7 +103,12 @@ fn wire_output(p: IVec4, toward: IVec4, get: &impl Fn(IVec4) -> Option<BlockStat
     }
     let connections = HORIZONTAL_DIRECTIONS.map(|d| {
         let q = p + d;
-        get(q).is_some_and(|s| emitter(s.id))
+        // Beta joins dust to a repeater only along the repeater's axis.
+        get(q).is_some_and(|s| {
+            emitter(s.id)
+                && (!matches!(s.id, block::REPEATER | block::REPEATER_OFF)
+                    || repeater_direction(s.metadata).abs() == d.abs())
+        })
             || !opaque(q, get) && get(q - IVec4::Y).is_some_and(|s| emitter(s.id))
             || !opaque(p + IVec4::Y, get)
                 && opaque(q, get)
@@ -186,6 +191,59 @@ pub fn wire_power(p: IVec4, get: &impl Fn(IVec4) -> Option<BlockState>) -> u8 {
         .filter_map(|q| get(q).map(|s| s.metadata.min(15).saturating_sub(1)))
         .max()
         .unwrap_or(0)
+}
+/// Resolves a whole connected dust network at once, as Beta's recursive wire
+/// update does within one tick. Returns only wires whose strength changes.
+/// Loops cannot sustain themselves while counting down frame by frame.
+pub fn wire_network(
+    start: IVec4,
+    limit: usize,
+    get: &impl Fn(IVec4) -> Option<BlockState>,
+) -> Vec<(IVec4, u8)> {
+    use std::collections::HashMap;
+    if !get(start).is_some_and(|s| s.id == block::REDSTONE_WIRE) {
+        return Vec::new();
+    }
+    let mut index = HashMap::from([(start, 0usize)]);
+    let mut nodes = vec![start];
+    let mut links: Vec<Vec<IVec4>> = Vec::new();
+    let mut i = 0;
+    while i < nodes.len() {
+        let next = wire_neighbors(nodes[i], get);
+        for &q in &next {
+            if nodes.len() < limit && !index.contains_key(&q) {
+                index.insert(q, nodes.len());
+                nodes.push(q);
+            }
+        }
+        links.push(next);
+        i += 1;
+    }
+    let mut power: Vec<u8> = nodes.iter().map(|&p| input_power(p, false, get).min(15)).collect();
+    let mut buckets: [Vec<usize>; 16] = Default::default();
+    for (i, &level) in power.iter().enumerate() {
+        buckets[level as usize].push(i);
+    }
+    for level in (2..=15u8).rev() {
+        while let Some(i) = buckets[level as usize].pop() {
+            if power[i] != level {
+                continue;
+            }
+            for q in &links[i] {
+                if let Some(&j) = index.get(q)
+                    && power[j] < level - 1
+                {
+                    power[j] = level - 1;
+                    buckets[level as usize - 1].push(j);
+                }
+            }
+        }
+    }
+    nodes
+        .into_iter()
+        .zip(power)
+        .filter(|&(p, level)| get(p).is_some_and(|s| s.metadata != level))
+        .collect()
 }
 pub fn torch_input(
     p: IVec4,

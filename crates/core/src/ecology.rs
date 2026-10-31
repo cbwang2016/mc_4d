@@ -10,6 +10,7 @@ pub const ACTIVE_BLOCKS: &[u8] = &[
     block::GRASS,
     block::SNOW,
     block::SNOW_LAYER,
+    block::ICE,
     block::DANDELION,
     block::ROSE,
     block::BROWN_MUSHROOM,

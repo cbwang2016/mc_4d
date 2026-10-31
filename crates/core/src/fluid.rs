@@ -221,6 +221,11 @@ fn desired_with_routes(world: &impl FluidWorld, p: IVec4, old: block::BlockId,ro
             return if level == 0 { OBSIDIAN } else { COBBLE };
         }
     }
+    // np.k: lava that can fall into water replaces that water with stone.
+    if current.is_some_and(|(kind, _)| kind == FluidKind::Water)
+        && world.fluid_block(p + IVec4::Y).and_then(block::fluid).is_some_and(|(kind, _)| kind == FluidKind::Lava) {
+        return block::STONE;
+    }
     if current.is_some_and(|(_, level)| level == 0) { return old; }
     // Freeze existing flow at unknown borders: absence of loaded terrain is not
     // proof that its supply disappeared. Newly loaded neighbors wake this again.
@@ -246,10 +251,10 @@ fn desired_with_routes(world: &impl FluidWorld, p: IVec4, old: block::BlockId,ro
             let neighbor = p + d;
             let Some((k, level)) = world.fluid_block(neighbor).and_then(block::fluid) else { continue };
             if k != kind { continue; }
-            // A falling column spreads sideways only when it meets support.
-            // Other horizontal flow likewise favors falling over spreading.
+            // np.k: flow spreads only over a flow barrier; a source also spreads
+            // over resting liquid of its kind. A falling column below still wins.
             let supported = world.fluid_block(neighbor - IVec4::Y).is_some_and(|id| {
-                blocks_flow(id) || block::fluid(id).is_some_and(|(k, l)| k == kind && l != 8)
+                blocks_flow(id) || level == 0 && block::fluid(id).is_some_and(|(k, l)| k == kind && l != 8)
             });
             if !supported { continue; }
             if current.is_none() {
@@ -456,5 +461,25 @@ mod tests {
             assert!(work.processed <= 3 && work.changed <= 3 && work.scanned <= 7);
         }
         assert!(s.pending() > 0);
+    }
+
+    #[test]
+    fn lava_falling_onto_water_turns_it_to_stone() {
+        let mut w = TestWorld::new(); let mut s = FluidSimulator::default();
+        w.set(IVec4::Y, WATER, &mut s); settle(&mut w, &mut s, 100);
+        w.set(IVec4::Y * 4, LAVA, &mut s); settle(&mut w, &mut s, 100);
+        assert_eq!(w.fluid_block(IVec4::Y), Some(STONE));
+        let flow = FluidKind::Water.flowing(3); let p = IVec4::new(5, 1, 0, 0);
+        w.blocks.insert(p, flow); w.blocks.insert(p + IVec4::Y, FluidKind::Lava.flowing(8));
+        assert_eq!(desired(&w, p, flow), STONE);
+    }
+
+    #[test]
+    fn flowing_water_does_not_spread_across_flowing_water() {
+        let mut w = TestWorld::new(); let p = IVec4::new(0, 2, 0, 0);
+        w.blocks.insert(p, FluidKind::Water.flowing(2)); w.blocks.insert(p - IVec4::Y, FluidKind::Water.flowing(3));
+        assert_eq!(desired(&w, p + IVec4::X, AIR), AIR);
+        w.blocks.insert(p, WATER);
+        assert_eq!(desired(&w, p + IVec4::X, AIR), FluidKind::Water.flowing(1), "sources still spread over liquid");
     }
 }

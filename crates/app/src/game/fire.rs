@@ -216,7 +216,7 @@ impl Game {
                 self.fire.scans.push_back((c, event.identity, 0));
             }
         }
-        for _ in 0..128 {
+        for _ in 0..1024 {
             let Ok(change) = self.fire.changes.try_recv() else {
                 break;
             };
@@ -264,7 +264,7 @@ impl Game {
                 self.fire.schedule(c * 16 + local, 10);
             }
         }
-        for _ in 0..4 {
+        for _ in 0..64 {
             let Some(p) = self.fire.next() else { break };
             if self.world.block(p).is_none() {
                 self.fire.schedule(p, 20);
@@ -454,5 +454,23 @@ mod tests {
         game.respawn();
         assert!(!game.burning());
         assert_eq!(game.health, 20);
+    }
+    #[test]
+    fn many_simultaneous_fires_keep_the_original_ten_tick_pace() {
+        let (mut g, _) = arena();
+        g.environment.raining = false;
+        let mut fires = Vec::new();
+        for x in 0..10 {
+            for w in 0..10 {
+                let p = IVec4::new(x, 4, 12, w);
+                g.world.set_block(p, block::FIRE);
+                fires.push(p);
+            }
+        }
+        // Unfuelled fire on stone ages at10-tick intervals and is out by age4.
+        for _ in 0..80 {
+            g.update_fire(0.05);
+        }
+        assert!(fires.iter().all(|&p| g.world.block(p) == Some(AIR)));
     }
 }

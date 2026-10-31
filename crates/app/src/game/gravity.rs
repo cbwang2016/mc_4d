@@ -126,7 +126,7 @@ impl Game {
                 self.gravity.scans.push_back((c, event.identity, 0));
             }
         }
-        for _ in 0..128 {
+        for _ in 0..1024 {
             let Ok(change) = self.gravity.changes.try_recv() else {
                 break;
             };
@@ -314,5 +314,26 @@ mod tests {
             g.dropped_items[0].stack.block,
             item::ItemId::from(block::GRAVEL)
         );
+    }
+    #[test]
+    fn busy_edit_frames_do_not_delay_sand_activation() {
+        let (mut g, p) = arena();
+        g.world.set_block(p - IVec4::Y, block::STONE);
+        g.world.set_block(p, block::SAND);
+        g.update_gravity(0.0);
+        for frame in 0..14 {
+            // Unrelated edits, e.g. fluids alone may change128 cells a frame.
+            for i in 0..256 {
+                let q = IVec4::new(i % 16, 12, i / 16, 0);
+                g.world
+                    .set_block(q, if frame % 2 == 0 { block::STONE } else { AIR });
+            }
+            if frame == 10 {
+                g.world.set_block(p - IVec4::Y, AIR);
+            }
+            g.update_gravity(0.05);
+        }
+        assert_eq!(g.world.block(p), Some(AIR));
+        assert_eq!(g.gravity.entities.len(), 1);
     }
 }
