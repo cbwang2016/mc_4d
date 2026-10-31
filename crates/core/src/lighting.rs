@@ -1272,18 +1272,29 @@ mod tests {
         // Keep the real two-slot worker channel full of distant 64-chunk
         // snapshots. This must not delay a local torch until input stops.
         let sender = engine.sender.as_ref().unwrap().clone();
+        let distant: Vec<_> = (100..104)
+            .flat_map(|x| {
+                (0..WORLD_CHUNKS_Y)
+                    .map(move |y| (IVec4::new(x, y, 0, 0), Some(Chunk::uniform(block::AIR))))
+            })
+            .collect();
+        // Queue the first snapshots before polling: a producer thread that
+        // starts late (as on Windows CI) would let the torch publish unopposed.
+        let mut serial = 3;
+        for _ in 0..3 {
+            sender
+                .send(Batch {
+                    serial,
+                    chunks: distant.clone(),
+                })
+                .unwrap();
+            serial += 1;
+        }
         let stopped = Arc::new(AtomicBool::new(false));
         let stop = stopped.clone();
-        let sent = Arc::new(AtomicUsize::new(0));
+        let sent = Arc::new(AtomicUsize::new(3));
         let count = sent.clone();
         let producer = thread::spawn(move || {
-            let distant: Vec<_> = (100..104)
-                .flat_map(|x| {
-                    (0..WORLD_CHUNKS_Y)
-                        .map(move |y| (IVec4::new(x, y, 0, 0), Some(Chunk::uniform(block::AIR))))
-                })
-                .collect();
-            let mut serial = 3;
             while !stop.load(Ordering::Relaxed) {
                 match sender.try_send(Batch {
                     serial,
